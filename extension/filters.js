@@ -42,13 +42,16 @@
       if (record.attributeName === "hidden" || record.attributeName === "aria-hidden") {
         if (owner) {
           const affectsStyle = checksPostStyle() && feedPosts.containsBodyText(target);
-          if (!affectsStyle && !(settings.hideNonEnglish && feedPosts.visibilityAffectsLanguage(target))) continue;
+          const rowVisibility = owner === target && record.attributeName === "hidden";
+          if (!rowVisibility && !affectsStyle && !(settings.hideNonEnglish && feedPosts.visibilityAffectsLanguage(target))) continue;
         } else {
           const spacer = !target.childElementCount && target.parentElement?.hasAttribute("data-mox-compact");
           const viewerControls = profileLinks + "," + accountSwitcher;
           const viewerChanged = record.attributeName === "hidden" && settings.usOnly &&
             (target.closest(viewerControls) || target.querySelector(viewerControls));
-          if (!spacer && !viewerChanged) continue;
+          const articles = record.attributeName === "hidden" ? target.querySelectorAll("article") : [];
+          articles.forEach(invalidate);
+          if (!spacer && !viewerChanged && !articles.length) continue;
         }
       }
       if (owner && owner !== target && (record.attributeName === "style" || record.attributeName === "class")) {
@@ -64,7 +67,11 @@
         article = article.parentElement?.closest("article")) {
         invalidate(article);
       }
-      if (record.attributeName === "data-href") target?.querySelectorAll(":scope > article").forEach(invalidate);
+      // The outer permalink may be on the wrapper or its direct overlay link.
+      if (!owner && (record.type === "childList" || ["href", "data-href", "role"].includes(record.attributeName))) {
+        const wrapper = target?.matches("a") ? target.parentElement : target;
+        wrapper?.querySelectorAll(":scope > article").forEach(invalidate);
+      }
       if (record.type === "childList") {
         for (const node of record.addedNodes) {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
@@ -428,13 +435,15 @@
             expiry = Math.min(expiry, item.until);
             if (item === gate || item.paused || (item.result === "unknown" && item.cooldown && gate))
               return "paused";
+            if (item.reason === "unknown") return "unverified";
             return item.result;
           }
           return "pending";
         });
         const otherCountry = results.includes("other");
         const paused = results.includes("paused");
-        const missing = paused || results.includes("unknown");
+        const unverified = results.includes("unverified");
+        const missing = paused || unverified || results.includes("unknown");
         const unresolved = results.indexOf("pending");
         if (paused && !otherCountry) pausedRows++;
         else if (missing && (settings.hideUnverified || !otherCountry)) unavailable++;
@@ -442,8 +451,17 @@
         if (!otherCountry && unresolved !== -1 && !languagePending && (!settings.hideUnverified || !missing))
           pending.set(article, authors[unresolved]);
         if (!missing && !otherCountry && unresolved === -1 && !languagePending) confirmedUs++;
-        blocked = otherCountry;
+        // Counting waits for a completed exclusion while strict mode can
+        // temporarily collapse pending checks, cooldowns and incomplete rows.
+        blocked = otherCountry || (settings.hideUnverified && unverified);
         hide = otherCountry || (settings.hideUnverified && (missing || unresolved !== -1));
+      }
+      // Leave an already concealed site row alone. Its later reveal will be
+      // observed, and a row we collapsed remains eligible for a late ID.
+      if (hide && (article.closest("[hidden]") ||
+          (!article.closest("[data-mox-hide]") && !article.checkVisibility()))) {
+        hide = false;
+        blocked = false;
       }
       if (blocked && post.id && !reported.has(post.id)) pendingBlocks.add(post.id);
       decisions.set(article, hide);

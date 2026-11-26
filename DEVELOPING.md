@@ -20,6 +20,9 @@ For the actual browser menu and worker wakeup, run `npm run test:native` on Linu
 node tests/fixture.cjs --review=post-style
 node tests/fixture.cjs --review=caps
 node tests/fixture.cjs --review=private-stats
+node tests/fixture.cjs --review=count-location
+node tests/fixture.cjs --review=count-identity
+PRIOR_EXTENSION_DIR=/path/to/prior-release EXTENSION_DIR=/path/to/candidate node tests/fixture.cjs --review=count-upgrade
 node tests/fixture.cjs --review=background-feed
 ```
 

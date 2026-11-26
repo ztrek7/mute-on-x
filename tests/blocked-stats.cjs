@@ -45,31 +45,31 @@ module.exports = async function ({source, observer, until, restart}) {
   await mount(source, post("12") + post("15"));
   await expectCounts(observer, 5, 5);
   await cdp.detach();
-  // Pending US and unverified authors shouldn't increase the total.
+  // Pending US is temporary. A completed missing label and a non-US result are strict exclusions.
   await mount(source, post("16","slowpanel","An update.") + post("17","missing","An update.") + post("18","maple","An update."));
   await source.bringToFront();
   await observer.evaluate(() => chrome.storage.local.set({usOnly:true, hideUnverified:true}));
   await until(() => source.locator("article").first().isHidden(), "US post waiting for confirmation");
   assert.equal(await badge(observer), "5");
   await until(() => source.locator("article").first().isVisible(), "confirmed US post restored");
-  await expectCounts(observer, 6, 6);
+  await expectCounts(observer, 7, 7);
   await observer.evaluate(() => chrome.storage.local.set({usOnly:false, hideNonEnglish:false}));
   await another.close();
   await source.goto("about:blank");
   const warm = await restart();
-  await expectCounts(warm.observer, 0, 6);
+  await expectCounts(warm.observer, 0, 7);
   await warm.source.goto("https://x.com/home");
   await mount(warm.source, post("11"));
   await warm.observer.locator("#hideNonEnglish").check();
-  await expectCounts(warm.observer, 1, 7);
+  await expectCounts(warm.observer, 1, 8);
   assert.deepEqual(await warm.observer.evaluate(async () => {
     const data = await chrome.storage.local.get(null);
     return Object.keys(data).filter(k => k.startsWith("blocked")).map(k => [k, data[k]]);
-  }), [["blockedAllTime", 7]]);
+  }), [["blockedAllTime", 8]]);
   const translated = '<button aria-label="Show original"></button>';
   await mount(warm.source, Array.from({length:1000}, (_, i) =>
     post(String(i + 100), "local", "An update.", translated)).join(""));
-  await expectCounts(warm.observer, 1001, 1007);
+  await expectCounts(warm.observer, 1001, 1008);
   console.log("PASS actual toolbar and popup counts, concurrent tabs, quotes, recycling, filter toggles, worker restart and full Brave restart");
 };
 

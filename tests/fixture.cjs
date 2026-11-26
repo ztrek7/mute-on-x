@@ -111,6 +111,12 @@ async function run() {
     await fs.writeFile(path.join(profile, "Local State"), JSON.stringify({
       brave: { origin: { free_tier_accepted: true } }
     }));
+    const upgrade = process.argv.includes("--review=count-upgrade");
+    const installed = upgrade ? path.join(profile, "unpacked-extension") : extension;
+    if (upgrade) {
+      assert.ok(process.env.PRIOR_EXTENSION_DIR, "set PRIOR_EXTENSION_DIR to an extracted previous ZIP");
+      await fs.cp(path.resolve(process.env.PRIOR_EXTENSION_DIR), installed, {recursive:true});
+    }
     const launch = () => chromium.launchPersistentContext(profile, {
       executablePath: process.env.BROWSER_BIN || chromium.executablePath(),
       locale: "en-US",
@@ -119,7 +125,7 @@ async function run() {
         "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"],
       env: Object.fromEntries(["PATH", "LANG", "DISPLAY", "XAUTHORITY"].filter(k => process.env[k])
         .map(k => [k, process.env[k]]).concat([["HOME", profile], ["XDG_CONFIG_HOME", profile]])),
-      args: ["--lang=en-US", `--disable-extensions-except=${extension}`, `--load-extension=${extension}`,
+      args: ["--lang=en-US", `--disable-extensions-except=${installed}`, `--load-extension=${installed}`,
         "--no-proxy-server", "--disable-background-networking", "--disable-quic",
         `--ignore-certificate-errors-spki-list=${fingerprint}`,
         `--host-resolver-rules=MAP x.com 127.0.0.1:${server.address().port}, MAP api.x.com 127.0.0.1:${server.address().port}, MAP * ~NOTFOUND`]
@@ -226,6 +232,12 @@ async function run() {
       console.log("PASS persistent popup switches across a full Brave Origin restart");
     }
     const review = process.argv.find(arg => arg.startsWith("--review="));
+    if (upgrade) {
+      await require("./count-upgrade.cjs")({source, observer, until, replace:async () => {
+        await fs.cp(extension, installed, {recursive:true});
+      }});
+      return;
+    }
     if (review) {
       const restart = async () => {
         const observerUrl=observer.url();

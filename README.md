@@ -1,6 +1,6 @@
 # Mute on X
 
-**[Download Mute on X 1.8.0 for Brave or Chromium](https://github.com/ztrek7/mute-on-x/releases/download/v1.8.0/mute-on-x-1.8.0.zip)**
+**[Download Mute on X 1.8.1 for Brave or Chromium](https://github.com/ztrek7/mute-on-x/releases/download/v1.8.1/mute-on-x-1.8.1.zip)**
 
 1. Download the ZIP and unzip it into a folder you’ll keep.
 2. Open `brave://extensions` in Brave or `chrome://extensions` in Chromium. Turn on **Developer mode**.
@@ -25,7 +25,7 @@ Open **Mute on X** from the extensions menu. All filters start off.
 
 These two switches work independently on the post’s own text in your browser. They skip bylines, quoted posts and link previews. They make no requests and do not compare posts across accounts.
 
-The toolbar shows how many identified posts the filters have hidden this session. The popup includes the regular profile’s all-time count. Private windows have a separate session count. Filtering changes what you see locally. The mute command changes your X account.
+The toolbar counts each identified outer post once per browser session, even across tabs and overlapping filters. In strict location mode, a completed lookup with a missing label counts. Pending lookups and temporary service failures can hide a row while the count waits. If the outer post has no unambiguous status link, it stays filtered and counts only if its link appears while it still matches. The popup includes the regular profile’s all-time count. Private windows have a separate session count. Filtering changes what you see locally. The mute command changes your X account.
 
 The extension uses a Chromium 130+ API. X can change its web service, reject a request or ask you to verify your session. If a save is unconfirmed, check your muted words before trying again. For data use, prerequisites, tests and release checksum instructions, see the [privacy policy](distribution/listing/privacy.html) and [developer guide](DEVELOPING.md).
 

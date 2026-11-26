@@ -85,6 +85,15 @@ const feedPosts = (() => {
     ).filter(el => !el.closest('[data-testid="card.wrapper"]') &&
       !(el.matches("article") && el.parentElement.closest('[data-slot="embedded-tweet-frame"]')));
   }
+  // Only a single-post wrapper owns its URL. A transparent sibling link is
+  // the click target in some timelines; other links can refer to other posts.
+  function rowPermalinks(article) {
+    const parent = article.parentElement;
+    if (!parent?.matches("div,li,[role=link],[role=listitem]")) return [];
+    const sibling = article.previousElementSibling || article.nextElementSibling;
+    if (sibling && (parent.childElementCount !== 2 || !sibling.matches("a[href]:empty"))) return [];
+    return [parent.dataset.href, sibling?.getAttribute("href")];
+  }
   function author(root, within, quote, byline, postIds) {
     const handles = new Set();
     function addPermalink(value) {
@@ -92,7 +101,7 @@ const feedPosts = (() => {
       if (name) handles.add(name);
     }
     addPermalink(root.getAttribute("data-href") || root.getAttribute("href"));
-    if (!quote && root.parentElement?.matches('[role=link][data-href]')) addPermalink(root.parentElement.dataset.href);
+    if (!quote) rowPermalinks(root).forEach(addPermalink);
     for (const link of root.querySelectorAll("a[href]")) {
       if (within(link) && !link.closest(bodySelector + ',[data-testid="socialContext"],[data-testid="card.wrapper"]'))
         addPermalink(link.getAttribute("href"));
