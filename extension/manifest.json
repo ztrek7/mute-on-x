@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "130",
+  "incognito": "split",
+  "name": "Mute on X",
+  "icons": { "16": "icon16.png", "24": "icon24.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png" },
+  "version": "1.6.3",
+  "content_security_policy": {
+    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  },
+  "description": "Right-click a word or selection to mute it on X, and optionally filter posts by account location, language or an all-caps opening.",
+  "permissions": ["contextMenus", "storage", "alarms"],
+  "action": { "default_icon": { "16": "icon16.png", "24": "icon24.png", "32": "icon32.png", "48": "icon48.png" }, "default_popup": "filters.html", "default_title": "Mute on X · Feed filters" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["https://x.com/*"],
+    "js": ["capture.js", "settings.js", "post.js", "viewer.js", "about-data.js", "layout.js", "feed-hint.js", "filters.js"],
+    "run_at": "document_start"
+  }]
+}

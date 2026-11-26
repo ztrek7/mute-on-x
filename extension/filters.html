@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Mute on X · Feed filters</title>
+<link rel="stylesheet" href="filters.css">
+<h1>X feed filters</h1>
+<label><input type="checkbox" id="usOnly" disabled> Hide posts from non-US accounts</label>
+<p>Posts load immediately. A confirmed non-US location for the author or a quoted author hides the whole post.</p>
+<div id="countryOptions" hidden>
+<label><input type="checkbox" id="hideUnverified" disabled> Also hide unverified locations</label>
+<p>Only show posts once X confirms US authors.</p>
+</div>
+<label><input type="checkbox" id="hideNonEnglish" disabled> Hide identifiable non-English text</label>
+<p>Hides posts when X displays a translation, including translated quotes. Also checks post text and author names for non-English writing.</p>
+<label><input type="checkbox" id="hideAllCaps" disabled> Hide posts that open in ALL CAPS</label>
+<p>Checks the first sentence of the post. Author names and quoted posts are skipped.</p>
+<section class="stats" aria-labelledby="statsHeading">
+  <h2 id="statsHeading">Posts blocked</h2>
+  <dl>
+    <div><dt id="sessionLabel">This session</dt><dd id="blockedNow">–</dd></div>
+    <div id="lifetimeStat"><dt>All time</dt><dd id="blockedTotal">–</dd></div>
+  </dl>
+</section>
+<p id="status" role="status"></p>
+<p id="metrics"></p>
+<button type="button" id="restore" hidden>Show all locations</button>
+<button type="button" id="next" hidden>Check for more posts</button>
+<script src="popup.js"></script>
+</html>
