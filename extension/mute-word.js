@@ -1,3 +1,5 @@
+const nativeMuteFormNeeded = Symbol("native mute form needed");
+
 // Only the native context-menu action calls this in the originating X document.
 async function saveMutedWord(term, pageUrl) {
   if (term.length > 140) throw new Error("Choose a word or phrase of 140 characters or fewer.");
@@ -43,6 +45,10 @@ async function saveMutedWord(term, pageUrl) {
       if (response.status === 401) throw new Error("X requires sign-in. Open X settings to check your session.");
       if (response.status === 403 || response.type === "opaqueredirect")
         throw new Error("X denied access or requires verification. Open X settings to continue.");
+      if (!writeStarted && [404, 410].includes(response.status)) {
+        await checkSession();
+        throw nativeMuteFormNeeded;
+      }
       if (!response.ok) throw new Error(`X returned HTTP ${response.status}. ` + uncertain);
       try {
         data = await response.json();

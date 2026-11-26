@@ -77,6 +77,7 @@
     const dismiss = document.createElement("button");
     dismiss.type = "button";
     dismiss.textContent = "Close";
+    dismiss.style.cssText = "flex:none;white-space:nowrap";
     dismiss.addEventListener("click", dismissNotice);
     box.append(status, dismiss);
     root.append(box);
@@ -86,7 +87,50 @@
 
   document.addEventListener("visibilitychange", showNext);
 
+  function formNotice(text) {
+    messages.push({text, pageUrl: location.href});
+    showNext();
+  }
+
+  if (window === window.top && location.href === "https://x.com/settings/add_muted_keyword") {
+    void chrome.runtime.sendMessage({type: "native-mute-prefill"}).then(term => {
+      if (typeof term !== "string" || !term) return;
+      // X hydrates the native form after navigation. Only fill an empty, editable field.
+      // All choices and the final Save remain under the user's control.
+      const path = location.href;
+      const stop = () => { observer.disconnect(); clearTimeout(timeout); };
+      function fill() {
+        if (location.href !== path) { stop(); return; }
+        const fields = [...document.querySelectorAll('input[name="keyword"]')]
+          .filter(el => el.type === "text" && el.checkVisibility() && !el.disabled && !el.readOnly);
+        if (fields.length !== 1) return;
+        const field = fields[0];
+        stop();
+        if (field.value || (field.maxLength >= 0 && term.length > field.maxLength)) {
+          formNotice("Review the word and settings, then choose Save in X.");
+          return;
+        }
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(field, term);
+        field.dispatchEvent(new Event("input", {bubbles:true}));
+        formNotice("Review the word and settings, then choose Save in X.");
+      }
+      const observer = new MutationObserver(fill);
+      const timeout = setTimeout(() => {
+        stop();
+        if (location.href === path) formNotice("Enter “" + term + "” in X’s muted-word form and choose Save.");
+      }, 12_000);
+      observer.observe(document, {subtree:true, childList:true, attributes:true,
+        attributeFilter:["name","type","hidden","style","class","disabled","readonly"]});
+      window.addEventListener("pagehide", stop, {once:true});
+      fill();
+    }).catch(() => {});
+  }
+
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if (message.type === "native-form-error" && sender.id === chrome.runtime.id && message.pageUrl === location.href) {
+      formNotice("Couldn’t open X’s Add muted word form. You can add the word from X’s muted-word settings.");
+      return;
+    }
     if (message.type !== "mute-selection" || sender.id !== chrome.runtime.id ||
         window !== window.top || location.origin !== "https://x.com" || message.pageUrl !== location.href) return;
     const last = capture;
@@ -109,11 +153,23 @@
       messages.push({text, error, pageUrl: message.pageUrl});
       showNext();
     };
-    respond(true);
     if (!term) {
       display("Right-click directly on a word or a selected phrase, then choose Mute on X again.", true);
+      respond(true);
       return;
     }
-    saveMutedWord(term, message.pageUrl).then(text => display(text), err => display(err.message, true));
+    saveMutedWord(term, message.pageUrl).then(text => {
+      display(text);
+      respond(true);
+    }, error => {
+      if (error === nativeMuteFormNeeded && location.href === message.pageUrl) {
+        display("Finish muting in X’s Add muted word form. Review the settings and choose Save.");
+        respond({nativeTerm: term});
+      } else {
+        display(error.message || "The X page changed. Choose Mute on X again.", true);
+        respond(true);
+      }
+    });
+    return true;
   });
 })();

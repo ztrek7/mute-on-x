@@ -6,6 +6,15 @@
 const main = document.querySelector("main");
 if (location.pathname === "/home") {
   main.innerHTML = '<p>Explore <span id="word">nebula</span> above <span id="phrase">blue mountains</span>. Find <a href="/tag">#夜空</a>. <span id="duration">Forever</span></p><p id="blank" style="width:500px">left</p>';
+} else if (location.pathname === "/settings/add_muted_keyword") {
+  setTimeout(() => {
+    main.innerHTML = '<input type="text" name="keyword"><button disabled>Save</button>';
+    const field = main.querySelector("input"), save = main.querySelector("button");
+    field.oninput = () => { save.disabled = !field.value; };
+    save.onclick = async () => {
+      await fetch("/fixture/native-save", {method: "POST", body: field.value});
+    };
+  }, 80);
 } else {
   main.innerHTML = "<h1>Sign in to X</h1>";
 }

@@ -1,6 +1,6 @@
 # Mute on X
 
-**[Download Mute on X 1.8.1 for Brave or Chromium](https://github.com/ztrek7/mute-on-x/releases/download/v1.8.1/mute-on-x-1.8.1.zip)**
+**[Download Mute on X 1.8.2 for Brave or Chromium](https://github.com/ztrek7/mute-on-x/releases/download/v1.8.2/mute-on-x-1.8.2.zip)**
 
 1. Download the ZIP and unzip it into a folder you’ll keep.
 2. Open `brave://extensions` in Brave or `chrome://extensions` in Chromium. Turn on **Developer mode**.
@@ -9,7 +9,7 @@
 
 ## Mute a word or phrase
 
-On a signed-in X page, right-click a word or select a phrase and choose **Mute on X**. The extension checks your account’s muted words, submits one save from the current page, and reads the list again. A confirmation appears on the page once X lists the term. Your tab and reading position stay in place.
+On a signed-in X page, right-click a word or select a phrase and choose **Mute on X**. The extension checks your account’s muted words, submits one save from the current page, and reads the list again. A confirmation appears on the page once X lists the term. If X returns 404 or 410 on the initial list check, the extension opens X’s Add muted word form in a new tab and fills in your selection. Review the settings there and choose Save. An uncertain save is never retried.
 
 New entries request **Home timeline, replies and notifications from anyone, forever**. These are the extension’s defaults. Existing entries keep their settings. You can change the scope or duration, remove a word, or check an unconfirmed save in [X’s muted-word settings](https://x.com/settings/muted_keywords).
 

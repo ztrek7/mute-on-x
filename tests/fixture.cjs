@@ -54,6 +54,14 @@ async function run() {
       if (require("./account.cjs").serve(request, response, visits, hits)) return;
       if (require("./review.cjs").serveReview(request, response, visits)) return;
       if (serveFilters(request, response, hits)) return;
+      if (request.url === "/fixture/native-save") {
+        assert.equal(request.method, "POST");
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        words.push(Buffer.concat(chunks).toString());
+        saves.push({native: true});
+        return response.end();
+      }
       const modern = request.headers[":authority"] === "api.x.com";
       const api = (modern ? "" : "/i/api") + "/1.1/mutes/keywords/";
       if (request.url.startsWith(api)) {
@@ -78,6 +86,9 @@ async function run() {
           loads++;
           if (mode === "changed-session" && loads === 1)
             response.setHeader("Set-Cookie", "ct0=replaced; Domain=x.com; Path=/; Secure; SameSite=Strict");
+          if (mode === "list-404" || (mode === "readback-404" && loads > 1)) response.writeHead(404);
+          if (mode === "list-denied") response.writeHead(403);
+          if (mode === "list-limited") response.writeHead(429);
           if (mode === "login") response.writeHead(401);
           if (mode === "bad-list") return response.end("{}");
           if (mode === "verify-fail" && loads === 2) response.writeHead(503);
@@ -91,12 +102,13 @@ async function run() {
         const params = Object.fromEntries(new URLSearchParams(Buffer.concat(chunks).toString()));
         saves.push({params, modern, privateSession});
         await reach("save");
+        if (mode === "create-404") response.writeHead(404);
         if (mode === "timeout") return;
         if (mode === "disconnect") return request.stream.close(http2.constants.NGHTTP2_CANCEL);
         if (mode === "deny" || mode === "rate") response.writeHead(mode === "deny" ? 403 : 429);
         if (mode === "redirect") response.writeHead(302, {location: "https://x.com/rejected"});
         if (mode === "reject") return response.end(JSON.stringify({errors: [{message: "fixture rejection"}]}));
-        if (mode === "success") words.push(params.keyword);
+        if (mode === "success" || mode === "list-404") words.push(params.keyword);
         return response.end(JSON.stringify({muted_keywords: [{keyword: params.keyword}]}));
       }
       assert.notEqual(request.url, "/rejected", "mutation redirect must never be followed");
@@ -267,6 +279,33 @@ async function run() {
       await checkFilters();
       return;
     }
+    // The signed-in web client can load its native form even when the extension's initial GET returns 404.
+    async function nativeFormFallback() {
+      reset("list-404");
+      await source.locator("#word").evaluate(el => { el.textContent = "BREAKING"; });
+      await click("#word");
+      if (nativeMenu) await source.keyboard.press("Escape");
+      await dispatch();
+      await until(() => context.pages().some(p => p.url() === "https://x.com/settings/add_muted_keyword"),
+        "an initial list 404 opens X's native form");
+      const form = context.pages().find(p => p.url() === "https://x.com/settings/add_muted_keyword");
+      await until(async () => await form.locator('[name="keyword"]').inputValue() === "BREAKING", "literal term prefilled");
+      assert.equal(source.url(), "https://x.com/home");
+      assert.deepEqual([loads, saves.length], [1, 0]);
+      assert.equal(await form.locator("button").isEnabled(), true);
+      await form.locator("button").click();
+      await until(() => words.includes("BREAKING"), "native Save applied the selected term");
+      assert.equal(saves.length, 1);
+      await form.reload();
+      assert.equal(await form.locator('[name="keyword"]').inputValue(), "");
+      await form.close();
+      await source.bringToFront();
+      await source.locator("#word").evaluate(el => { el.textContent = "nebula"; });
+      console.log("PASS initial list 404, origin feed preserved, one-use prefill, only native Save writes");
+    }
+    await nativeFormFallback();
+    if (process.argv.includes("--native-form-only")) return;
+    reset("success");
     if (nativeMenu) {
       const cdp = await context.newCDPSession(observer);
       const targets = async () => (await cdp.send("Target.getTargets")).targetInfos;
@@ -340,6 +379,8 @@ async function run() {
       ["rate", "X is rate-limiting", 1], ["redirect", "X denied access", 1],
       ["optimistic", "Save unconfirmed", 1], ["verify-fail", "Save unconfirmed", 1],
       ["disconnect", "Save unconfirmed", 1], ["timeout", "Save unconfirmed", 1],
+      ["readback-404", "Save unconfirmed", 1], ["create-404", "Save unconfirmed", 1],
+      ["list-denied", "X denied access", 0], ["list-limited", "X is rate-limiting", 0],
       ["bad-list", "Couldn’t verify", 0], ["login", "X requires sign-in", 0]
     ]) {
       reset(scenario);
