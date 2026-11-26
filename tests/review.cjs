@@ -27,6 +27,7 @@ exports.serveReview = (req, res, visits) => {
 };
 
 exports.runReview = async ({source, observer, until, visits, restart}, scenario) => {
+  if (scenario === "post-style") return require("./post-style.cjs")({source, observer, until, restart, visits});
   if (scenario === "caps") return require("./caps.cjs")({source, observer, until, restart, visits});
   if (scenario === "private-stats") return require("./blocked-stats.cjs").privateWindow({source, observer, until});
   if (scenario === "blocked-stats") return require("./blocked-stats.cjs")({source, observer, until, restart});

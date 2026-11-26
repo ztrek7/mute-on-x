@@ -4,11 +4,11 @@
   "incognito": "split",
   "name": "Mute on X",
   "icons": { "16": "icon16.png", "24": "icon24.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png" },
-  "version": "1.7.0",
+  "version": "1.8.0",
   "content_security_policy": {
     "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
   },
-  "description": "Right-click a word or selection to mute it on X, and optionally filter posts by account location, language or an all-caps opening.",
+  "description": "Mute words on X and optionally hide posts by account location, language, all-caps openings, repeated text or alert-style headlines.",
   "permissions": ["contextMenus", "storage"],
   "action": { "default_icon": { "16": "icon16.png", "24": "icon24.png", "32": "icon32.png", "48": "icon48.png" }, "default_popup": "filters.html", "default_title": "Mute on X · Feed filters" },
   "background": { "service_worker": "background.js" },

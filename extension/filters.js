@@ -13,7 +13,9 @@
   const locations = new Map();
   let cacheReady = false, readingCache = false, pause, identityDeadline = 0;
   const languages = new WeakMap();
-  const settings = {usOnly: false, hideUnverified: false, hideNonEnglish: false, hideAllCaps: false};
+  const settings = {usOnly: false, hideUnverified: false, hideNonEnglish: false, hideAllCaps: false, hideRepeatedText: false, hideAlertHeadlines: false};
+  const checksPostStyle = () => settings.hideAllCaps || settings.hideRepeatedText || settings.hideAlertHeadlines;
+  const anyFilterEnabled = () => settings.usOnly || settings.hideNonEnglish || checksPostStyle();
   let timer, retry, working, style;
   let currentPath = location.pathname, seenFeed = false;
   let waitingFor, waitStarted;
@@ -32,14 +34,15 @@
     for (const record of records) {
       const target = record.target.nodeType === Node.ELEMENT_NODE ? record.target : record.target.parentElement;
       const owner = target?.closest("article");
+      if (record.attributeName === "alt" && !(settings.hideAlertHeadlines || settings.hideRepeatedText)) continue;
       if (record.attributeName === "aria-label") {
         if (!owner || !settings.hideNonEnglish) continue;
         if (!feedPosts.isTranslationLabel(record.oldValue) && !feedPosts.isTranslationLabel(target.getAttribute("aria-label"))) continue;
       }
       if (record.attributeName === "hidden" || record.attributeName === "aria-hidden") {
         if (owner) {
-          const affectsCaps = settings.hideAllCaps && feedPosts.containsBodyText(target);
-          if (!affectsCaps && !(settings.hideNonEnglish && feedPosts.visibilityAffectsLanguage(target))) continue;
+          const affectsStyle = checksPostStyle() && feedPosts.containsBodyText(target);
+          if (!affectsStyle && !(settings.hideNonEnglish && feedPosts.visibilityAffectsLanguage(target))) continue;
         } else {
           const spacer = !target.childElementCount && target.parentElement?.hasAttribute("data-mox-compact");
           const viewerControls = profileLinks + "," + accountSwitcher;
@@ -136,14 +139,14 @@
     parsed = new WeakMap();
     resetPagination();
     if (settings.usOnly) void readCachedLocations();
-    if (settings.usOnly || settings.hideNonEnglish || settings.hideAllCaps) {
+    if (anyFilterEnabled()) {
       monitor.observe(document, {
         childList: true,
         subtree: true,
         characterData: true,
         attributes: true,
         attributeOldValue: true,
-        attributeFilter: ["href", "data-href", "lang", "data-testid", "data-slot", "dir", "role", "class", "style", "aria-label", "aria-hidden", "hidden"]
+        attributeFilter: ["href", "data-href", "lang", "data-testid", "data-slot", "dir", "role", "class", "style", "alt", "aria-label", "aria-hidden", "hidden"]
       });
     }
     schedule();
@@ -388,7 +391,7 @@
     }
     const feed =
       !/^\/(?:settings|login|messages|compose|i\/(?:flow|jf|chat|grok)|[^/]+\/about)(?:\/|$)/i.test(currentPath);
-    const enabled = feed && (settings.usOnly || settings.hideNonEnglish || settings.hideAllCaps);
+    const enabled = feed && anyFilterEnabled();
     if (enabled && !style?.isConnected) {
       style = document.createElement("style");
       style.textContent = feedLayout.stylesheet;
@@ -406,12 +409,12 @@
     for (const article of posts) {
       let post = parsed.get(article);
       if (!post) {
-        post = feedPosts.read(article, settings.hideNonEnglish, settings.hideAllCaps);
+        post = feedPosts.read(article, settings);
         parsed.set(article, post);
       }
       const {authors, bodies, translated} = post;
 
-      let hide = post.capsOpening || (settings.hideNonEnglish && (translated || checkLanguage(article, bodies)));
+      let hide = post.styleMatch || (settings.hideNonEnglish && (translated || checkLanguage(article, bodies)));
       let blocked = hide;
       const languagePending = settings.hideNonEnglish && !translated && languages.get(article)?.pending;
       detecting ||= languagePending;
@@ -517,7 +520,8 @@
     if (viewer && cold.length && !readingCache) void readCachedLocations(cold.slice(0, 400));
     const ready = !settings.usOnly || (cacheReady && !gate);
     const noMatches = posts.length > 0 && ready && !shown && !waiting && !unchecked && !detecting;
-    canCheckMore = ready && (unchecked > 0 || noMatches);
+    const paginate = settings.usOnly || settings.hideNonEnglish || settings.hideAllCaps;
+    canCheckMore = paginate && ready && (unchecked > 0 || noMatches);
     const counts = [];
     if (enabled && posts.length) {
       seenFeed = true;
@@ -549,7 +553,7 @@
     emptyFeedHint.update(main, hint, canCheckMore, advance, showLocationsHere);
     if (showingLocationsHere && feed) counts.push("Showing all locations in this tab until reload");
     status = counts.join(" · ");
-    checkPageEnd(posts, noMatches);
+    checkPageEnd(posts, paginate && noMatches);
     if (next && (viewer || now >= identityDeadline) && cacheReady && !readingCache && !working &&
       !document.hidden) {
       working = true;

@@ -141,6 +141,59 @@ const feedPosts = (() => {
     }
     return false;
   }
+  function hasRepeatedText(text) {
+    const lines = new Map(), fragments = new Map();
+    function thirdOccurrence(counts, unit) {
+      const key = unit.normalize("NFKC").trim().toLowerCase().replace(/\s+/gu, " ").replace(/[.!?…。！？]+$/u, "").trimEnd();
+      // Link targets and handles don't supply the substantive words.
+      const prose = key.replace(/(?:https?:\/\/|www\.)\S+|@[\w]+|\b(?:[\w-]+\.)+[a-z]{2,}(?:[/?#]\S*)?/giu, " ");
+      const words = prose.match(/\p{L}[\p{L}\p{M}]*/gu) || [];
+      if (words.length < 3 || new Set(words).size < 2 || (prose.match(/\p{L}/gu) || []).length < 12) return false;
+      const count = (counts.get(key) || 0) + 1;
+      counts.set(key, count);
+      return count === 3;
+    }
+    // Track the two kinds separately: a one-sentence line is one occurrence.
+    for (const line of text.split(/[\r\n\u2028\u2029]+/u)) {
+      if (thirdOccurrence(lines, line)) return true;
+      for (const {segment} of sentences.segment(line))
+        if (thirdOccurrence(fragments, segment)) return true;
+    }
+    return false;
+  }
+  function hasAlertOpening(text) {
+    const opening = text.normalize("NFKC").replace(/[\u200b\u200e\u200f\ufe0e\ufe0f]/gu, "").trimStart();
+    if (opening.startsWith("🚨")) return true;
+    const [first] = opening.split(/[:\r\n\u2028\u2029–—]|\s+-|-\s+/u, 1);
+    const label = first.replace(/^(?:[🔴⚠]\s*)+/u, "").trim().replace(/\s+/gu, " ");
+    return /^(?:#?\s*(?:breaking(?: news)?|just in|news alert)|#(?:breakingnews|justin|newsalert))$/iu.test(label);
+  }
+  function styleText(body) {
+    const quotes = new Set(quoteRoots(body));
+    const skip = 'button,[role="button"],script,style,svg,[hidden],[data-testid="card.wrapper"],[data-testid="User-Name"],[data-testid="socialContext"],[data-testid="tweetPhoto"]';
+    const pieces = [];
+    function visit(node) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        pieces.push(node.data);
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE || quotes.has(node) || node.matches(skip)) return;
+      // A native emoji image may itself be aria-hidden. Keep only emoji alt
+      // text, never media descriptions or content inside a hidden wrapper.
+      if (node.tagName === "IMG") {
+        const alt = node.alt.trim();
+        if (/^\p{Extended_Pictographic}[\uFE0E\uFE0F]?$/u.test(alt)) pieces.push(alt);
+        return;
+      }
+      if (node.getAttribute("aria-hidden") === "true") return;
+      const block = node.tagName === "DIV" || node.tagName === "P";
+      if (block || node.tagName === "BR") pieces.push("\n");
+      for (const child of node.childNodes) visit(child);
+      if (block) pieces.push("\n");
+    }
+    visit(body);
+    return pieces.join("").trim();
+  }
   function bodyText(el) {
     const clone = el.cloneNode(true);
     clone.querySelectorAll('button,[role="button"],script,style,[hidden],[aria-hidden="true"]').forEach(node => node.remove());
@@ -156,9 +209,9 @@ const feedPosts = (() => {
     }
     return clone.textContent.trim();
   }
-  function read(article, includeBodies = true, checkCaps = false) {
+  function read(article, {hideNonEnglish: includeBodies, hideAllCaps: checkCaps, hideRepeatedText, hideAlertHeadlines}) {
     const translated = includeBodies && displaysTranslation(article);
-    let capsOpening = false;
+    let styleMatch = false;
     const quotes = quoteRoots(article);
     const authors = [];
     const bodies = [];
@@ -171,7 +224,8 @@ const feedPosts = (() => {
       authors.push(id ? handle+"@"+id : handle);
       let readLanguage = includeBodies && !translated;
       let readOpening = checkCaps && root === article;
-      if (!readLanguage && !readOpening) continue;
+      let readStyle = (hideRepeatedText || hideAlertHeadlines) && root === article;
+      if (!readLanguage && !readOpening && !readStyle) continue;
       if (readLanguage) {
         const name = displayName(root, byline, handle, within);
         if (name) bodies.push(["", name]);
@@ -180,21 +234,28 @@ const feedPosts = (() => {
         if (!within(el) || el.closest('[data-testid="card.wrapper"],[data-testid="User-Name"],[data-testid="socialContext"],[hidden],[aria-hidden="true"]') ||
             el.parentElement.closest(bodySelector)) continue;
         const languageBody = readLanguage && !el.closest(translationPanel);
-        if (!languageBody && !readOpening) continue;
-        const text = bodyText(el);
-        if (!text) continue;
-        if (languageBody) {
-          bodies.push([el.lang, text]);
-          readLanguage = false;
+        if (readStyle && !el.closest(translationPanel)) {
+          const ownText = styleText(el);
+          if (ownText) {
+            styleMatch ||= (hideAlertHeadlines && hasAlertOpening(ownText)) || (hideRepeatedText && hasRepeatedText(ownText));
+            readStyle = false;
+          }
         }
-        if (readOpening) {
-          capsOpening = startsInCaps(text);
-          readOpening = false;
+        if (languageBody || readOpening) {
+          const text = bodyText(el);
+          if (text && languageBody) {
+            bodies.push([el.lang, text]);
+            readLanguage = false;
+          }
+          if (text && readOpening) {
+            styleMatch ||= startsInCaps(text);
+            readOpening = false;
+          }
         }
-        if (!readLanguage && !readOpening) break;
+        if (!readLanguage && !readOpening && !readStyle) break;
       }
     }
-    return { authors: [...new Set(authors)], bodies, translated, capsOpening, id: postIds.size === 1 ? postIds.values().next().value : null };
+    return { authors: [...new Set(authors)], bodies, translated, styleMatch, id: postIds.size === 1 ? postIds.values().next().value : null };
   }
   // Test letters only. Digits, punctuation, emoji and combining marks do not
   // establish a writing system, and names can be a single letter in a script.

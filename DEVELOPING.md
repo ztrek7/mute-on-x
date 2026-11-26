@@ -17,6 +17,7 @@ Set `BROWSER_BIN` to the absolute executable path of an extension-capable deskto
 For the actual browser menu and worker wakeup, run `npm run test:native` on Linux with Python 3, Xvfb and xvfb-run, xauth, X11 and XTest libraries, ImageMagick’s `import`, Tesseract with English data, and working fonts. The test opens its own virtual display. The private-window scenario enables incognito access only in its temporary profile. Examples of focused runs:
 
 ```sh
+node tests/fixture.cjs --review=post-style
 node tests/fixture.cjs --review=caps
 node tests/fixture.cjs --review=private-stats
 node tests/fixture.cjs --review=background-feed

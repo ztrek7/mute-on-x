@@ -206,6 +206,14 @@ module.exports.privateWindow = async function ({source, observer, until}) {
   await until(async () => (await fresh.evaluate(readCount)) === "0", "new private session starts empty");
   await fresh.evaluate(() => chrome.tabs.create({url:"https://x.com/fixture/feed"}));
   await until(async () => (await fresh.evaluate(readCount)) === "2", "same posts counted anew in next private session");
+  // The same private post can qualify for both local style rules.
+  const feedTarget = (await targets()).find(t => t.type === "page" &&
+    t.browserContextId === fresh.context && t.url === "https://x.com/fixture/feed");
+  const privateFeed = await connectTarget(feedTarget);
+  await fresh.evaluate(() => chrome.storage.local.set({hideRepeatedText:true, hideAlertHeadlines:true}));
+  await privateFeed.evaluate(html => document.querySelector("main").insertAdjacentHTML("beforeend", html),
+    post("792", "sample", "🚨 Update.<br>Check the spare cable.<br>Check the spare cable.<br>Check the spare cable."));
+  await until(async () => (await fresh.evaluate(readCount)) === "3", "overlapping style matches count once in private");
   assert.equal(await regularBadge(), "4");
   assert.deepEqual(await popup.evaluate(() => chrome.storage.local.get("blockedAllTime")), {blockedAllTime:4});
   assert.deepEqual(await sharedKeys(), []);
