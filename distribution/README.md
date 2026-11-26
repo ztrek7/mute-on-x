@@ -6,7 +6,7 @@ Supply the publisher’s verified contact details. Host the [privacy policy](lis
 
 **Listing description**
 
-Right-click a word on x.com or select a phrase and choose **Mute on X**. From the current page, the extension checks your signed-in account’s list, saves new entries for the Home timeline, replies and notifications from anyone, and checks the updated list. The mute lasts until you change or remove it in X’s settings. A confirmed save appears on the original page. If X returns 404 or 410 on the initial list check, the extension opens X’s Add muted word form in a new tab and fills in your selection. Review the settings there and choose Save. An uncertain save is never retried.
+Right-click a word on x.com, or select a phrase and right-click it. Choose **Mute on X**. If X’s **Add muted word** form opens in a new tab, review the prefilled word, scope, and duration. Click **Save** in X to confirm. Closing the form before saving cancels this mute. Your original feed stays open. When the extension can check and save the word directly, you’ll see confirmation on the feed instead.
 
 The popup can also hide posts from non-US accounts, hide unverified locations, hide identifiable non-English text, hide posts that open in all caps, hide repeated lines or sentences, and hide alert-style headlines. Those filters stay off until you enable them. Language, all-caps, repetition and headline checks stay in the page. The two style switches inspect the post’s own text. The headline rule can also hide genuine news. The country filter requests account-location labels from X with your existing sign-in.
 

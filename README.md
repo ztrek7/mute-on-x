@@ -9,9 +9,12 @@
 
 ## Mute a word or phrase
 
-On a signed-in X page, right-click a word or select a phrase and choose **Mute on X**. The extension checks your account’s muted words, submits one save from the current page, and reads the list again. A confirmation appears on the page once X lists the term. If X returns 404 or 410 on the initial list check, the extension opens X’s Add muted word form in a new tab and fills in your selection. Review the settings there and choose Save. An uncertain save is never retried.
+Right-click a word on x.com, or select a phrase and right-click it. Choose **Mute on X** while signed in.
 
-New entries request **Home timeline, replies and notifications from anyone, forever**. These are the extension’s defaults. Existing entries keep their settings. You can change the scope or duration, remove a word, or check an unconfirmed save in [X’s muted-word settings](https://x.com/settings/muted_keywords).
+- **If a new X tab opens**, you’ll see **Add muted word** with your selection filled in. Review the word, where to mute it, and for how long. Click **Save** in X to confirm. Closing the tab before saving cancels this mute. Your original feed stays open.
+- **If you stay on the feed**, look for the confirmation there. When the extension can read your muted-word list directly, it checks for duplicates and verifies a new mute after saving. On this path it requests the Home timeline, replies, and notifications from anyone, with no expiration.
+
+You can change or remove a mute in [X’s muted-word settings](https://x.com/settings/muted_keywords).
 
 ## Feed filters
 
