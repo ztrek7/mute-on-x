@@ -53,6 +53,27 @@ module.exports = async function ({source, observer, until}, scenario) {
 
   await observer.evaluate(() => chrome.storage.local.set({hideNonEnglish:true}));
   await mount(cell(article(text + quote)));
+  if (scenario === "count-links") {
+    const timestamp = '<a href="/sample/status/731"><time>Today</time></a>';
+    const sourceLink = '<div><a href="/creator/status/900">From @creator</a></div>';
+    const byline = '<div data-testid="User-Name"><a href="/sample"><span>@sample</span></a></div>';
+    const media = (who, id, type) => '<a href="/' + who + '/status/' + id + '/' + type + '/1">' +
+      '<div data-testid="' + (type === "photo" ? "tweetPhoto" : "videoPlayer") + '"><img alt=""></div></a>';
+    await mount(cell(article(timestamp + text + sourceLink + '<div data-testid="birdwatch-pivot"><a href="/notes/status/901">Read a note</a></div>')) +
+      cell(article(byline + text + media("sample", "732", "photo"))) +
+      cell(article(byline + text + media("sample", "733", "video"))) +
+      cell(article(byline + text + media("creator", "950", "photo"))) +
+      cell(article(byline + text + '<div>From <a href="/creator/status/953">@creator</a></div>')) +
+      cell(article(byline + text + '<div data-testid="quoteTweet">' + media("sample", "951", "photo") + '</div>')) +
+      cell(article(byline + text + '<a href="/sample/status/952/analytics">Views</a>')));
+    await until(() => main.locator("article").evaluateAll(rows => rows.every(el => !el.getClientRects().length)), "matching rows hidden");
+    await expectCount(3);
+    const keys = await observer.evaluate(async () => Object.entries(await chrome.storage.session.get(null))
+      .filter(([key]) => key.startsWith("blockedSession:")).map(([,ids]) => ids).sort());
+    assert.deepEqual(keys, ["731","732","733"]);
+    console.log("PASS timestamp with secondary links and attributable own photo/video links");
+    return;
+  }
   const row = main.locator('article[data-testid="tweet"]');
   await until(() => row.isHidden(), "language filter hid the mounted outer post");
   const receipt = ids => observer.evaluate(async ids => {

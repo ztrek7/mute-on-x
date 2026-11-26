@@ -22,6 +22,7 @@ node tests/fixture.cjs --review=caps
 node tests/fixture.cjs --review=private-stats
 node tests/fixture.cjs --review=count-location
 node tests/fixture.cjs --review=count-identity
+node tests/fixture.cjs --review=count-links
 PRIOR_EXTENSION_DIR=/path/to/prior-release EXTENSION_DIR=/path/to/candidate node tests/fixture.cjs --review=count-upgrade
 node tests/fixture.cjs --review=background-feed
 ```

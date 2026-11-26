@@ -66,15 +66,15 @@ const feedPosts = (() => {
     }
     return false;
   }
-  function permalink(value, postIds) {
+  function permalink(value) {
     if (!value) return null;
     try {
       const url = new URL(value, location.origin);
       if (url.origin !== location.origin) return null;
-      const match = /^\/(\w{1,15}|i\/web)\/status\/(\d{1,20})\/?$/i.exec(url.pathname);
-      if (match) postIds?.add(match[2]);
-      const handle = match?.[1].toLowerCase();
-      return handle && handle !== "i" && handle !== "i/web" ? handle : null;
+      const match = /^\/(\w{1,15}|i\/web)\/status\/(\d{1,20})(?:\/(photo|video)\/[1-9]\d*)?\/?$/i.exec(url.pathname);
+      if (!match) return null;
+      const handle = match[1].toLowerCase();
+      return {id:match[2], handle:handle === "i" || handle === "i/web" ? null : handle, media:match[3]};
     } catch { return null; }
   }
   function quoteRoots(article) {
@@ -95,16 +95,43 @@ const feedPosts = (() => {
     return [parent.dataset.href, sibling?.getAttribute("href")];
   }
   function author(root, within, quote, byline, postIds) {
-    const handles = new Set();
-    function addPermalink(value) {
-      const name = permalink(value, postIds);
-      if (name) handles.add(name);
+    const primary = [], secondary = [], media = [];
+    for (const value of [root.dataset.href || root.getAttribute("href"), ...(!quote ? rowPermalinks(root) : [])]) {
+      const ref = permalink(value);
+      if (ref) primary.push(ref);
     }
-    addPermalink(root.getAttribute("data-href") || root.getAttribute("href"));
-    if (!quote) rowPermalinks(root).forEach(addPermalink);
-    for (const link of root.querySelectorAll("a[href]")) {
-      if (within(link) && !link.closest(bodySelector + ',[data-testid="socialContext"],[data-testid="card.wrapper"]'))
-        addPermalink(link.getAttribute("href"));
+    const excluded = bodySelector + ',[data-testid="socialContext"],[data-testid="card.wrapper"],[data-testid*="birdwatch" i],[data-testid*="communityNote" i],[data-testid*="attribution" i]';
+    const bylineHandles = new Set();
+    for (const el of byline?.querySelectorAll("a[href]") || []) {
+      const match = el.origin === location.origin && /^\/(\w{1,15})\/?$/.exec(el.pathname);
+      if (match && within(el)) bylineHandles.add(match[1].toLowerCase());
+    }
+    let outerBody;
+    for (const link of root.querySelectorAll('a[href*="/status/"]')) {
+      if (!within(link) || link.closest(excluded)) continue;
+      const ref = permalink(link.getAttribute("href"));
+      if (!ref) continue;
+      if (link.querySelector("time") || byline?.contains(link)) primary.push(ref);
+      else if (ref.media) {
+        // Media without a timestamp requires both a matching native byline
+        // and a media target. A creator/quoted/status action link is not proof.
+        const mediaBox = '[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"]';
+        if (bylineHandles.size === 1 && bylineHandles.has(ref.handle) &&
+            (link.closest(mediaBox) || link.querySelector(mediaBox + ",img,video"))) media.push(ref);
+      } else {
+        // Older headers use a plain link before the text instead of <time>.
+        // Links in footers and credits lack that evidence of ownership.
+        outerBody ??= [...root.querySelectorAll(bodySelector)].find(within);
+        const inHeader = outerBody ? (link.compareDocumentPosition(outerBody) & Node.DOCUMENT_POSITION_FOLLOWING) :
+          root.firstElementChild === link;
+        if (inHeader && (!bylineHandles.size || bylineHandles.has(ref.handle)) &&
+            !link.closest('[data-testid="videoPlayer"],[data-testid="videoComponent"]')) secondary.push(ref);
+      }
+    }
+    const handles = new Set();
+    for (const ref of primary.length ? primary : media.length ? media : secondary) {
+      if (ref.handle) handles.add(ref.handle);
+      postIds?.add(ref.id);
     }
     const identity = byline || (!handles.size && quote ? root : null);
     for (const node of identity?.querySelectorAll("span") || []) {

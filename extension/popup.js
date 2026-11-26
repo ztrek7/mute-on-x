@@ -23,8 +23,10 @@
   const restore = document.getElementById("restore");
   const next = document.getElementById("next");
   async function readStatus() {
-    const text = await chrome.tabs.sendMessage(tab.id, { type: "feed-status" }, { frameId: 0 }).catch(() => "");
-    status.textContent = text || "";
+    const text = await chrome.tabs.sendMessage(tab.id, { type: "feed-status" }, { frameId: 0 }).catch(() => null);
+    const filtering = document.querySelector("input:checked:not(#hideUnverified)");
+    const needsRefresh = typeof text !== "string" && filtering && (!tab.url || tab.url.startsWith("https://x.com/"));
+    status.textContent = needsRefresh ? "Open or refresh your x.com tab to connect the feed filters." : text || "";
     const metrics = text && await chrome.tabs.sendMessage(tab.id, {type: "feed-metrics"}, {frameId: 0}).catch(() => null);
     const details = [];
     if (metrics && document.getElementById("usOnly").checked) {

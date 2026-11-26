@@ -5,7 +5,7 @@
 1. Download the ZIP and unzip it into a folder you’ll keep.
 2. Open `brave://extensions` in Brave or `chrome://extensions` in Chromium. Turn on **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
-4. Refresh your open x.com tabs. To update an unpacked installation, replace the files in the same folder, click **Reload** on the extension card, and refresh X.
+4. Refresh your open x.com tabs. To update an unpacked installation, replace the files in the same folder, click **Reload** on the extension card, and refresh each open X tab so it runs the updated filters and counter.
 
 ## Mute a word or phrase
 

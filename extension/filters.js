@@ -69,7 +69,8 @@
       }
       // The outer permalink may be on the wrapper or its direct overlay link.
       if (!owner && (record.type === "childList" || ["href", "data-href", "role"].includes(record.attributeName))) {
-        const wrapper = target?.matches("a") ? target.parentElement : target;
+        const overlayChanged = target?.matches("a") && (record.type === "childList" || record.attributeName === "href");
+        const wrapper = overlayChanged ? target.parentElement : target;
         wrapper?.querySelectorAll(":scope > article").forEach(invalidate);
       }
       if (record.type === "childList") {
@@ -177,7 +178,7 @@
     configure();
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && settings.usOnly) void readCachedLocations();
+    if (chrome.runtime?.id && !document.hidden && settings.usOnly) void readCachedLocations();
     schedule();
   });
   window.navigation?.addEventListener("currententrychange", schedule);
@@ -369,8 +370,24 @@
       }, delay);
     }
   }
+  let disconnected = false;
   function refresh() {
-    if (!document.body) return;
+    if (disconnected || !document.body) return;
+    // Unpacked reloads invalidate the API but leave this document and its
+    // observer alive. Restore existing rows before another stale scan runs.
+    if (!chrome.runtime?.id) {
+      disconnected = true;
+      monitor.disconnect();
+      activeRead?.abort();
+      cancelPageTimer();
+      clearTimeout(retry);
+      clearTimeout(retryBlocks);
+      pendingBlocks.clear();
+      feedLayout.apply(new Map(), false);
+      style?.remove();
+      emptyFeedHint.update(null);
+      return;
+    }
     if (currentPath !== location.pathname) {
       currentPath = location.pathname;
       seenFeed = false;
