@@ -93,12 +93,22 @@
   }
 
   if (window === window.top && location.href === "https://x.com/settings/add_muted_keyword") {
-    void chrome.runtime.sendMessage({type: "native-mute-prefill"}).then(term => {
+    // Claim promptly, but let deferred page scripts attach their input handlers.
+    // Register at document_start so DOMContentLoaded cannot race the worker reply.
+    const ready = document.readyState === "loading"
+      ? new Promise(resolve => document.addEventListener("DOMContentLoaded", resolve, {once:true}))
+      : Promise.resolve();
+    void Promise.all([chrome.runtime.sendMessage({type: "native-mute-prefill"}), ready]).then(([term]) => {
       if (typeof term !== "string" || !term) return;
       // X hydrates the native form after navigation. Only fill an empty, editable field.
       // All choices and the final Save remain under the user's control.
-      const path = location.href;
-      const stop = () => { observer.disconnect(); clearTimeout(timeout); };
+      const path = "https://x.com/settings/add_muted_keyword";
+      let scheduled = 0;
+      const stop = () => { observer.disconnect(); clearTimeout(timeout); clearTimeout(scheduled); };
+      const schedule = () => {
+        if (scheduled) return;
+        scheduled = setTimeout(() => { scheduled = 0; fill(); }, 0);
+      };
       function fill() {
         if (location.href !== path) { stop(); return; }
         const fields = [...document.querySelectorAll('input[name="keyword"]')]
@@ -114,7 +124,7 @@
         field.dispatchEvent(new Event("input", {bubbles:true}));
         formNotice("Review the word and settings, then choose Save in X.");
       }
-      const observer = new MutationObserver(fill);
+      const observer = new MutationObserver(schedule);
       const timeout = setTimeout(() => {
         stop();
         if (location.href === path) formNotice("Enter “" + term + "” in X’s muted-word form and choose Save.");
@@ -122,7 +132,7 @@
       observer.observe(document, {subtree:true, childList:true, attributes:true,
         attributeFilter:["name","type","hidden","style","class","disabled","readonly"]});
       window.addEventListener("pagehide", stop, {once:true});
-      fill();
+      schedule();
     }).catch(() => {});
   }
 

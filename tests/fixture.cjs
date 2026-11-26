@@ -54,6 +54,17 @@ async function run() {
       if (require("./account.cjs").serve(request, response, visits, hits)) return;
       if (require("./review.cjs").serveReview(request, response, visits)) return;
       if (serveFilters(request, response, hits)) return;
+      if (request.url === "/settings/add_muted_keyword" && mode === "ssr-404") {
+        response.setHeader("Content-Type", "text/html");
+        return response.end('<script defer src="/fixture/hydrate.js"></script><input name="keyword"><button disabled>Save</button>');
+      }
+      if (request.url === "/fixture/hydrate.js") {
+        await new Promise(resolve => setTimeout(resolve, 140));
+        response.setHeader("Content-Type", "application/javascript");
+        return response.end(`const f = document.querySelector("input"), b = document.querySelector("button");
+          f.oninput = () => { b.disabled = !f.value; };
+          b.onclick = () => fetch("/fixture/native-save", {method:"POST", body:f.value});`);
+      }
       if (request.url === "/fixture/native-save") {
         assert.equal(request.method, "POST");
         const chunks = [];
@@ -86,7 +97,7 @@ async function run() {
           loads++;
           if (mode === "changed-session" && loads === 1)
             response.setHeader("Set-Cookie", "ct0=replaced; Domain=x.com; Path=/; Secure; SameSite=Strict");
-          if (mode === "list-404" || (mode === "readback-404" && loads > 1)) response.writeHead(404);
+          if (mode === "list-404" || mode === "ssr-404" || (mode === "readback-404" && loads > 1)) response.writeHead(404);
           if (mode === "list-denied") response.writeHead(403);
           if (mode === "list-limited") response.writeHead(429);
           if (mode === "login") response.writeHead(401);
@@ -280,8 +291,8 @@ async function run() {
       return;
     }
     // The signed-in web client can load its native form even when the extension's initial GET returns 404.
-    async function nativeFormFallback() {
-      reset("list-404");
+    async function nativeFormFallback(scenario) {
+      reset(scenario);
       await source.locator("#word").evaluate(el => { el.textContent = "BREAKING"; });
       await click("#word");
       if (nativeMenu) await source.keyboard.press("Escape");
@@ -292,7 +303,8 @@ async function run() {
       await until(async () => await form.locator('[name="keyword"]').inputValue() === "BREAKING", "literal term prefilled");
       assert.equal(source.url(), "https://x.com/home");
       assert.deepEqual([loads, saves.length], [1, 0]);
-      assert.equal(await form.locator("button").isEnabled(), true);
+      await form.waitForLoadState("domcontentloaded");
+      await until(() => form.locator("button").isEnabled(), "X received the prefill after hydration and enabled Save");
       await form.locator("button").click();
       await until(() => words.includes("BREAKING"), "native Save applied the selected term");
       assert.equal(saves.length, 1);
@@ -303,7 +315,8 @@ async function run() {
       await source.locator("#word").evaluate(el => { el.textContent = "nebula"; });
       console.log("PASS initial list 404, origin feed preserved, one-use prefill, only native Save writes");
     }
-    await nativeFormFallback();
+    await nativeFormFallback("list-404");
+    await nativeFormFallback("ssr-404");
     if (process.argv.includes("--native-form-only")) return;
     reset("success");
     if (nativeMenu) {
