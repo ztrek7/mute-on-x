@@ -1,5 +1,5 @@
 // These are public identifiers from X's web client. They identify the client
-// and a single read-only operation, never a signed-in person.
+// and a read-only account operation, never a signed-in person.
 const legacyEndpoint = "https://x.com/i/api/graphql/XRqGa7EeokUU5kppkh13EA/AboutAccountQuery";
 const relayEndpoint = "https://api.x.com/graphql/3M2SBIjPPDiTvMXkIWTx_w/AboutAccountQuery";
 const webClient = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
@@ -84,14 +84,18 @@ function readAccount(body, handle, expectedId) {
   return {outcome: typeof value === "string" ? locationValue(value.trim()) || "unknown" : "unknown", id};
 }
 
+function usesModernXClient() {
+  return !!document.documentElement.dataset.appVersion &&
+    !!document.querySelector('link[href^="https://abs.twimg.com/x-web/x-web/"]');
+}
+
 async function fetchAccount(msg, signal) {
   if (location.origin !== "https://x.com" || window !== window.top || !/^[a-z0-9_]{1,15}$/.test(msg.handle) ||
       feedViewer() !== msg.viewer || signal.aborted) return {outcome: "cancelled"};
   const csrf = await cookieStore.get("ct0");
   if (!csrf?.value) return {outcome: "login"};
   if (signal.aborted || feedViewer() !== msg.viewer) return {outcome: "cancelled"};
-  const relay = !!document.documentElement.dataset.appVersion &&
-    !!document.querySelector('link[href^="https://abs.twimg.com/x-web/x-web/"]');
+  const relay = usesModernXClient();
   const url = new URL(relay ? relayEndpoint : legacyEndpoint);
   const variables = {screenName: msg.handle};
   if (relay) variables.__relay_internal__pv__xclientsfeaturesappviewerisloggedinrelayprovider = Boolean(msg.viewer);

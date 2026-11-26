@@ -2,7 +2,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
-const https = require("node:https");
+const http2 = require("node:http2");
 const { X509Certificate, createHash } = require("node:crypto");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
@@ -49,32 +49,60 @@ async function run() {
     const key = await fs.readFile(path.join(profile, "key.pem"));
     const spki = new X509Certificate(cert).publicKey.export({ type: "spki", format: "der" });
     const fingerprint = createHash("sha256").update(spki).digest("base64");
-    server = https.createServer({ cert, key }, async (request, response) => {
+    server = http2.createSecureServer({ cert, key }, async (request, response) => {
       response.setHeader("Cache-Control", "no-store");
       if (require("./account.cjs").serve(request, response, visits, hits)) return;
-      response.setHeader("Set-Cookie", "ct0=fixture-only; Domain=x.com; Path=/; Secure; SameSite=Strict");
       if (require("./review.cjs").serveReview(request, response, visits)) return;
       if (serveFilters(request, response, hits)) return;
-      if (request.url === "/fixture/state") {
-        return response.end(JSON.stringify({ mode, words }));
-      }
-      if (request.url === "/fixture/save") {
+      const modern = request.headers[":authority"] === "api.x.com";
+      const api = (modern ? "" : "/i/api") + "/1.1/mutes/keywords/";
+      if (request.url.startsWith(api)) {
+        if (modern) {
+          assert.equal(request.headers.origin, "https://x.com");
+          response.setHeader("Access-Control-Allow-Origin", "https://x.com");
+          response.setHeader("Access-Control-Allow-Credentials", "true");
+          if (request.method === "OPTIONS") {
+            response.setHeader("Access-Control-Allow-Headers", request.headers["access-control-request-headers"]);
+            response.setHeader("Access-Control-Allow-Methods", "GET, POST");
+            response.writeHead(204); return response.end();
+          }
+        }
+        assert.ok(request.headers.authorization?.startsWith("Bearer "));
+        const privateSession = request.headers["x-csrf-token"] === "fixture-private";
+        const expectedCookie = privateSession ? "fixture-private" : "fixture-only";
+        assert.equal(request.headers["x-csrf-token"], expectedCookie);
+        assert.ok(request.headers.cookie?.includes("ct0=" + expectedCookie));
+        response.setHeader("Content-Type", "application/json");
+        if (request.url === api + "list.json") {
+          assert.equal(request.method, "GET");
+          loads++;
+          if (mode === "changed-session" && loads === 1)
+            response.setHeader("Set-Cookie", "ct0=replaced; Domain=x.com; Path=/; Secure; SameSite=Strict");
+          if (mode === "login") response.writeHead(401);
+          if (mode === "bad-list") return response.end("{}");
+          if (mode === "verify-fail" && loads === 2) response.writeHead(503);
+          return response.end(JSON.stringify({muted_keywords: words.map((keyword, i) => ({keyword, id: String(i+1)}))}));
+        }
+        assert.equal(request.url, api + "create.json");
+        assert.equal(request.method, "POST");
+        assert.match(request.headers["content-type"], /^application\/x-www-form-urlencoded/i);
         const chunks = [];
         for await (const chunk of request) chunks.push(chunk);
-        const data = JSON.parse(Buffer.concat(chunks));
-        saves.push(data);
+        const params = Object.fromEntries(new URLSearchParams(Buffer.concat(chunks).toString()));
+        saves.push({params, modern, privateSession});
         await reach("save");
-        if (mode === "success") words.push(data.term);
-        return response.end("{}");
+        if (mode === "timeout") return;
+        if (mode === "disconnect") return request.stream.close(http2.constants.NGHTTP2_CANCEL);
+        if (mode === "deny" || mode === "rate") response.writeHead(mode === "deny" ? 403 : 429);
+        if (mode === "redirect") response.writeHead(302, {location: "https://x.com/rejected"});
+        if (mode === "reject") return response.end(JSON.stringify({errors: [{message: "fixture rejection"}]}));
+        if (mode === "success") words.push(params.keyword);
+        return response.end(JSON.stringify({muted_keywords: [{keyword: params.keyword}]}));
       }
-      if (request.url === "/settings/muted_keywords") {
-        loads++;
-        if (loads === 2) await reach("verify");
-        if (mode === "login") {
-          response.writeHead(302, { location: "/i/jf/onboarding/web?mode=login" });
-          return response.end();
-        }
-      }
+      assert.notEqual(request.url, "/rejected", "mutation redirect must never be followed");
+      const fixtureCookie = request.url === "/home?private-mute" ? "fixture-private" : "fixture-only";
+      if (request.url === "/home" || request.url === "/home?private-mute")
+        response.setHeader("Set-Cookie", "ct0=" + fixtureCookie + "; Domain=x.com; Path=/; Secure; SameSite=Strict");
       response.setHeader("Content-Type", "text/html; charset=utf-8");
       response.end(html);
     });
@@ -105,7 +133,7 @@ async function run() {
       return { id: active.id, windowId: active.windowId };
     });
     const observer = context.pages().find(page => page !== source);
-    await observer.goto(new URL("/launch.html", worker.url()).href);
+    await observer.goto(new URL("/filters.html", worker.url()).href);
     await observer.evaluate(() => {
       document.title = "Fixture observer";
       window.events = [];
@@ -131,25 +159,17 @@ async function run() {
       } while (Date.now() < end);
       assert.fail(message);
     }
-    async function assertCleanup(count = 1, allowedActivations = []) {
-      const events = await readEvents();
-      const created = events.filter(e => e.type === "create");
-      assert.equal(created.length, count, JSON.stringify(events));
-      assert.ok(created.every(e => !e.active && e.win === tab.windowId), JSON.stringify(events));
-      assert.deepEqual(events.filter(e => e.type === "remove").map(e => e.id).sort(),
-        created.map(e => e.id).sort(), JSON.stringify(events));
-      assert.deepEqual(events.filter(e => e.type === "activate").map(e => e.id), allowedActivations, JSON.stringify(events));
-    }
-    const observerId = await observer.evaluate(async () => (await chrome.tabs.getCurrent()).id);
+    let navigations = 0;
+    source.on("framenavigated", () => navigations++);
     async function click(selector, position) {
       await source.bringToFront();
       await source.locator(selector).click({ button: "right", position });
     }
     // Headless has no browser-chrome menu. Dispatch its documented payload to
     // the registered handler, retaining the real trusted pointer event and tab APIs.
-    const dispatch = selectionText => worker.evaluate(({ tab, selectionText }) =>
-      handleMenu({ menuItemId: "mute-on-x", pageUrl: "https://x.com/home", frameId: 0, selectionText }, tab),
-      { tab, selectionText });
+    const dispatch = selectionText => worker.evaluate(({ tab, selectionText }) => {
+      void handleMenu({ menuItemId: "mute-on-x", pageUrl: "https://x.com/home", frameId: 0, selectionText }, tab);
+    }, { tab, selectionText });
     async function expectMessage(page, expected) {
       const cdp = await context.newCDPSession(page);
       const deadline = Date.now() + 22_000;
@@ -165,9 +185,6 @@ async function run() {
           }
           await new Promise(resolve => setTimeout(resolve, 120));
         } while (Date.now() < deadline);
-        console.error({ pages: context.pages().map(p => p.url()), saves, words, loads, events: await readEvents(),
-          jobs: await observer.evaluate(() => chrome.storage.session.get(null)),
-          foreground: await foreground(), visibility: await page.evaluate(() => document.visibilityState) });
         assert.fail(`Missing feedback "${expected}" on ${page.url()}`);
       } finally {
         await cdp.detach();
@@ -184,12 +201,13 @@ async function run() {
       }
       await clearEvents();
       assert.deepEqual(await foreground(), [tab.windowId, tab.id]);
+      const before = navigations;
       await choose();
       await expectMessage(source, expected);
       assert.equal(source.url(), "https://x.com/home");
       assert.deepEqual(await foreground(), [tab.windowId, tab.id]);
-      await assertCleanup();
-      assert.deepEqual((await readEvents()).filter(e => e.type === "focus"), []);
+      assert.equal(navigations, before, "menu must not navigate any frame");
+      assert.deepEqual(await readEvents(), [], "menu must not create, remove or activate tabs");
     }
 
     async function checkFilters() {
@@ -218,7 +236,14 @@ async function run() {
         const warmSource=await context.newPage();
         return {source:warmSource,observer:warmObserver};
       };
-      await require("./review.cjs").runReview({source,observer,until,visits,restart},review.split("=")[1]);
+      const scenario = review.split("=")[1];
+      await require("./review.cjs").runReview({source,observer,until,visits,restart}, scenario);
+      if (scenario === "private-stats") {
+        assert.equal(saves.length, 1);
+        assert.equal(saves[0].privateSession, true);
+        assert.equal((await context.cookies("https://x.com")).find(c => c.name === "ct0").value, "fixture-only");
+        console.log("PASS private mute uses the private session and preserves regular credentials");
+      }
       return;
     }
     if (process.argv.includes("--layout-only")) {
@@ -246,9 +271,9 @@ async function run() {
       worker = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker", { timeout: 8000 });
       console.log("PASS real menu click wakes a stopped worker");
     }
-    assert.deepEqual(saves, [{ term: "nebula", checks: [true, false], duration: "7 days" }]);
+    assert.deepEqual(saves, [{modern: false, privateSession: false, params: {keyword: "nebula", mute_surfaces: "notifications,home_timeline,tweet_replies", mute_options: "", duration: ""}}]);
     assert.equal(loads, 2);
-    console.log("PASS unselected word, saved once, defaults preserved, reloaded list, original timeline");
+    console.log("PASS unselected word, saved once, explicit scopes and duration, fresh list, original timeline");
 
     async function selectPhrase() {
       await source.evaluate(() => {
@@ -299,172 +324,60 @@ async function run() {
     console.log("PASS whitespace and navigation invalidate capture");
 
     for (const [scenario, expected, attempts] of [
-      ["reject", "X reported a problem saving the word.", 1],
-      ["optimistic", "Couldn’t find “nebula” in the reloaded", 1],
-      ["changed", "Couldn’t find X’s Add muted word form", 0],
-      ["login", "Sign in to X, then right-click", 0]
+      ["reject", "X reported a problem", 1], ["deny", "X denied access", 1],
+      ["rate", "X is rate-limiting", 1], ["redirect", "X denied access", 1],
+      ["optimistic", "Save unconfirmed", 1], ["verify-fail", "Save unconfirmed", 1],
+      ["disconnect", "Save unconfirmed", 1], ["timeout", "Save unconfirmed", 1],
+      ["bad-list", "Couldn’t verify", 0], ["login", "X requires sign-in", 0]
     ]) {
       reset(scenario);
       await click("#word");
       await action(expected);
       assert.equal(saves.length, attempts);
       assert.deepEqual(words, []);
-      console.log(`PASS ${scenario}`);
+      console.log("PASS", scenario, "without repeated writes or navigation");
     }
 
-    async function invoke() {
-      if (nativeMenu) await source.keyboard.press("Escape");
-      await dispatch();
-    }
+    reset("changed-session");
+    await click("#word");
+    await action("The X page or session changed");
+    assert.equal(saves.length, 0);
+    assert.equal(loads, 1);
+    console.log("PASS session rotation before save stops the write");
+
     reset("success");
-    const first = pauseAt("save");
+    await context.clearCookies({name: "ct0"});
     await click("#word");
-    await clearEvents();
-    await invoke();
-    await first.seen;
-    await click("#word");
-    await invoke();
-    await until(async () => (await readEvents()).filter(e => e.type === "create").length === 2,
-      "two independent requests");
-    first.release();
-    await expectMessage(source, "Confirmed “nebula”");
-    await expectMessage(source, "already in your muted words");
-    await assertCleanup(2);
-    assert.equal(saves.length, 1);
-    console.log("PASS overlapping requests, both results delivered, one native save");
+    await action("Sign in to X");
+    assert.equal(saves.length + loads, 0);
+    await source.reload();
+    console.log("PASS signed-out document sends no requests");
 
-    // A second real browser window and a different tab in the original
-    // window model the user choosing somewhere else to work mid-save.
-    const other = await observer.evaluate(async () => {
-      const win = await chrome.windows.create({ url: "about:blank", focused: true });
-      return { windowId: win.id, id: win.tabs[0].id };
+    await source.evaluate(() => {
+      document.documentElement.dataset.appVersion = "fixture";
+      const link = document.createElement("link");
+      link.href = "https://abs.twimg.com/x-web/x-web/fixture.css";
+      document.head.append(link);
     });
-    await observer.evaluate(id => chrome.windows.update(id, { focused: true }), tab.windowId);
-    await source.bringToFront();
-    reset("reject");
+    await click("#word");
+    await action("Confirmed “nebula”");
+    assert.equal(saves[0].modern, true);
+    assert.equal(loads, 2);
+    console.log("PASS modern first-party endpoint, credentialed CORS and verified readback");
+    await source.reload();
+
+    reset("success");
     const pending = pauseAt("save");
     await click("#word");
-    await clearEvents();
-    await invoke();
+    if (nativeMenu) await source.keyboard.press("Escape");
+    await dispatch();
     await pending.seen;
-    await observer.evaluate(id => chrome.tabs.update(id, { active: true }), observerId);
-    await observer.evaluate(id => chrome.windows.update(id, { focused: true }), other.windowId);
-    await until(async () => (await foreground())[0] === other.windowId, "fixture window takes focus");
-    const beforeClose = (await readEvents()).length;
+    await click("#word");
+    await action("Another mute is in progress");
     pending.release();
-    await until(async () => (await readEvents()).some(e => e.type === "remove"), "failure cleanup");
-    assert.deepEqual(await foreground(), [other.windowId, other.id]);
-    assert.deepEqual((await readEvents()).slice(beforeClose).map(e => e.type), ["remove"]);
-    await assertCleanup(1, [observerId]);
-    const [stillActive] = await observer.evaluate(windowId => chrome.tabs.query({ active: true, windowId }), tab.windowId);
-    assert.equal(stillActive.id, observerId);
-    await observer.evaluate(id => chrome.windows.update(id, { focused: true }), tab.windowId);
-    await source.bringToFront();
-    await expectMessage(source, "X reported a problem saving the word.");
-    await observer.evaluate(id => chrome.windows.remove(id), other.windowId);
-    console.log("PASS user-selected tab and other focused window kept through failure and close");
-
-    reset("success");
-    const verification = pauseAt("verify");
-    await click("#word");
-    await clearEvents();
-    await invoke();
-    await verification.seen;
-    await observer.evaluate(id => chrome.tabs.update(id, { active: true }), observerId);
-    assert.deepEqual(await foreground(), [tab.windowId, observerId]);
-    verification.release();
-    await until(async () => (await readEvents()).some(e => e.type === "remove"), "verified tab closes");
-    assert.deepEqual(await foreground(), [tab.windowId, observerId]);
-    await assertCleanup(1, [observerId]);
-    await source.bringToFront();
     await expectMessage(source, "Confirmed “nebula”");
-    console.log("PASS tab switch during fresh verification and success cleanup");
-
-    reset("success");
-    const adopted = pauseAt("save");
-    await click("#word");
-    await clearEvents();
-    await invoke();
-    await adopted.seen;
-    const helperId = (await readEvents()).find(e => e.type === "create").id;
-    await observer.evaluate(id => chrome.tabs.update(id, { active: true }), helperId);
-    adopted.release();
-    await until(async () => !(await observer.evaluate(() => chrome.alarms.getAll())).length, "user took over helper");
-    assert.deepEqual(await foreground(), [tab.windowId, helperId]);
-    await source.bringToFront();
-    await expectMessage(source, "You opened or moved the temporary tab");
-    assert.ok(await observer.evaluate(id => chrome.tabs.get(id), helperId));
-    await observer.evaluate(id => chrome.tabs.remove(id), helperId);
-    console.log("PASS explicitly selected helper handed to user");
-
-    reset("success");
-    const navigation = pauseAt("save");
-    await click("#word");
-    await clearEvents();
-    await invoke();
-    await navigation.seen;
-    await source.reload();
-    navigation.release();
-    await until(async () => (await readEvents()).some(e => e.type === "remove"), "helper cleaned after source reload");
-    assert.equal(await source.locator("aside").count(), 0);
-    await assertCleanup();
-    console.log("PASS replaced source document receives no stale notice or fallback tab");
-
-    reset("success");
-    const interrupted = pauseAt("save");
-    await click("#word");
-    await clearEvents();
-    await invoke();
-    await interrupted.seen;
-    const cdp = await context.newCDPSession(observer);
-    const targets = async () => (await cdp.send("Target.getTargets")).targetInfos;
-    const oldWorker = (await targets()).find(t => t.type === "service_worker" && t.url === worker.url());
-    assert.ok(oldWorker);
-    await cdp.send("Target.closeTarget", { targetId: oldWorker.targetId });
-    await until(async () => !(await targets()).some(t => t.targetId === oldWorker.targetId), "old worker stopped");
-    interrupted.release();
-    await until(async () => (await readEvents()).some(e => e.type === "remove"), "alarm wakes a new worker and cleans up", 65_000);
-    await expectMessage(source, "Mute on X was interrupted");
     assert.equal(saves.length, 1);
-    await assertCleanup();
-    assert.deepEqual(await foreground(), [tab.windowId, tab.id]);
-    assert.deepEqual(await observer.evaluate(() => chrome.storage.session.get(null)), {});
-    assert.deepEqual(await observer.evaluate(() => chrome.alarms.getAll()), []);
-    console.log("PASS forced worker termination after Save, automatic cleanup, no replay or false success");
-
-    // Pause only the ownership write in this disposable worker. Terminating it
-    // here exercises the narrow gap after real tab creation, before ID storage.
-    worker = context.serviceWorkers().find(w => w.url() === oldWorker.url);
-    assert.ok(worker);
-    await worker.evaluate(() => {
-      const write = chrome.storage.session.set.bind(chrome.storage.session);
-      chrome.storage.session.set = items => Object.values(items).some(job => job.helperId != null)
-        ? new Promise(() => {}) : write(items);
-    });
-    reset("success");
-    await click("#word");
-    await clearEvents();
-    const dispatching = invoke().catch(() => {}); // The test stops this worker mid-handler.
-    const unbound = await until(async () => (await readEvents()).find(e => e.type === "create"), "temporary tab created");
-    await until(async () => observer.evaluate(async id => {
-      const pages = await chrome.runtime.getContexts({ contextTypes: ["TAB"], tabIds: [id] });
-      return pages.some(p => new URL(p.documentUrl).pathname === "/launch.html");
-    }, unbound.id), "private launch document loaded");
-    const [pendingJob] = Object.values(await observer.evaluate(() => chrome.storage.session.get(null)));
-    assert.equal(pendingJob.helperId, undefined);
-    const unboundWorker = (await targets()).find(t => t.type === "service_worker" && t.url === worker.url());
-    await cdp.send("Target.closeTarget", { targetId: unboundWorker.targetId });
-    await until(async () => !(await targets()).some(t => t.targetId === unboundWorker.targetId), "worker stopped before ownership write");
-    await dispatching;
-    await observer.evaluate(id => chrome.tabs.update(id, { active: true }), observerId);
-    await until(async () => (await readEvents()).some(e => e.type === "remove"), "unbound launch cleaned", 65_000);
-    await assertCleanup(1, [observerId]);
-    assert.deepEqual(await foreground(), [tab.windowId, observerId]);
-    assert.equal(saves.length, 0);
-    await source.bringToFront();
-    await expectMessage(source, "Mute on X was interrupted");
-    await cdp.detach();
-    console.log("PASS early interruption closes only the request-specific private launch tab");
+    console.log("PASS concurrent requests share one write");
     await checkFilters();
   } finally {
     try { await context?.close(); }

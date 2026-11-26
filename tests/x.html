@@ -4,56 +4,8 @@
 <main></main>
 <script>
 const main = document.querySelector("main");
-const list = "/settings/muted_keywords";
-const add = "/settings/add_muted_keyword";
-async function showList() {
-  const { words, mode } = await (await fetch("/fixture/state")).json();
-  main.innerHTML = '<section><h1>Muted words</h1><a href="/settings/add_muted_keyword">Add</a></section>';
-  const section = main.querySelector("section");
-  for (const word of words) {
-    const row = document.createElement("div");
-    row.setAttribute("role", "link");
-    row.innerHTML = "<div></div><div>Forever</div><button>Unmute</button>";
-    row.firstChild.textContent = word;
-    section.append(row);
-  }
-  section.querySelector("a").onclick = event => {
-    event.preventDefault();
-    history.pushState({}, "", add);
-    main.innerHTML = '<section><h1>Add muted word</h1><input name="keyword" maxlength="140"><label><input type="checkbox" checked>Home timeline</label><label><input type="checkbox">Notifications</label><select><option>7 days</option></select><button disabled data-testid="settingsDetailSave">Save</button></section>';
-    const input = main.querySelector('[name="keyword"]');
-    const save = main.querySelector("button");
-    if (mode === "changed") save.removeAttribute("data-testid");
-    input.oninput = () => { save.disabled = !input.value; };
-    save.onclick = async () => {
-      const term = input.value;
-      await fetch("/fixture/save", {method: "POST", body: JSON.stringify({
-        term, checks: [...main.querySelectorAll('[type="checkbox"]')].map(c => c.checked),
-        duration: main.querySelector("select").value
-      })});
-      if (mode === "reject") {
-        const alert = document.createElement("div");
-        alert.setAttribute("role", "alert");
-        alert.textContent = "Could not save this word.";
-        main.append(alert);
-        return;
-      }
-      history.replaceState({}, "", list);
-      await showList();
-      if (mode === "optimistic") {
-        const row = document.createElement("div");
-        row.setAttribute("role", "link");
-        row.innerHTML = "<div></div><button>Unmute</button>";
-        row.firstChild.textContent = term;
-        main.querySelector("section").append(row);
-      }
-    };
-  };
-}
 if (location.pathname === "/home") {
   main.innerHTML = '<p>Explore <span id="word">nebula</span> above <span id="phrase">blue mountains</span>. Find <a href="/tag">#夜空</a>. <span id="duration">Forever</span></p><p id="blank" style="width:500px">left</p>';
-} else if (location.pathname === list) {
-  showList();
 } else {
   main.innerHTML = "<h1>Sign in to X</h1>";
 }

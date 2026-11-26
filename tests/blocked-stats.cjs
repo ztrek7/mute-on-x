@@ -100,13 +100,10 @@ module.exports.privateWindow = async function ({source, observer, until}) {
 
   // Observe the real popup in the disposable private browser context. Its tab
   // IDs and toolbar overrides are inaccessible from the regular extension page.
-  async function openPrivate() {
-    await popup.evaluate(url => chrome.windows.create({incognito:true, url}), popupUrl);
-    const target = await until(async () => (await targets()).find(t =>
-      t.type === "page" && t.url === popupUrl && t.browserContextId !== regularContext), "private popup opened");
+  async function connectTarget(target) {
     const {sessionId} = await cdp.send("Target.attachToTarget", {targetId:target.targetId});
     let seq = 0;
-    async function evaluate(fn, arg) {
+    async function command(method, params) {
       const id = ++seq;
       const response = new Promise((resolve, reject) => {
         function receive(event) {
@@ -114,18 +111,29 @@ module.exports.privateWindow = async function ({source, observer, until}) {
           const message = JSON.parse(event.message);
           if (message.id !== id) return;
           cdp.off("Target.receivedMessageFromTarget", receive);
-          if (message.error || message.result.exceptionDetails) reject(Error(JSON.stringify(message)));
-          else resolve(message.result.result.value);
+          if (message.error || message.result.exceptionDetails) reject(Error("Fixture CDP command failed: " + method));
+          else resolve(message.result);
         }
         cdp.on("Target.receivedMessageFromTarget", receive);
       });
-      await cdp.send("Target.sendMessageToTarget", {sessionId, message:JSON.stringify({id,
-        method:"Runtime.evaluate", params:{expression:"(" + fn + ")(" + JSON.stringify(arg) + ")",
-          awaitPromise:true, returnByValue:true}})});
+      await cdp.send("Target.sendMessageToTarget", {sessionId, message:JSON.stringify({id, method, params})});
       return response;
     }
-    await until(() => evaluate(() => chrome.extension?.inIncognitoContext === true), "private popup context ready");
-    return {evaluate, context:target.browserContextId};
+    async function evaluate(fn, arg) {
+      const result = await command("Runtime.evaluate", {
+        expression:"(" + fn + ")(" + JSON.stringify(arg) + ")", awaitPromise:true, returnByValue:true
+      });
+      return result.result.value;
+    }
+    return {command, evaluate, context:target.browserContextId};
+  }
+  async function openPrivate() {
+    await popup.evaluate(url => chrome.windows.create({incognito:true, url}), popupUrl);
+    const target = await until(async () => (await targets()).find(t =>
+      t.type === "page" && t.url === popupUrl && t.browserContextId !== regularContext), "private popup opened");
+    const client = await connectTarget(target);
+    await until(() => client.evaluate(() => chrome.extension?.inIncognitoContext === true), "private popup context ready");
+    return client;
   }
   const privatePage = await openPrivate();
   const readCount = () => document.querySelector("#blockedNow")?.textContent;
@@ -154,6 +162,25 @@ module.exports.privateWindow = async function ({source, observer, until}) {
     await checkPrivate(privateTab, 2);
   }
   await navigate("https://x.com/home");
+  const mutePage = "https://x.com/home?private-mute";
+  await navigate(mutePage);
+  const privateTarget = await until(async () => (await targets()).find(t =>
+    t.url === mutePage && t.browserContextId === privatePage.context), "private mute page ready");
+  const doc = await connectTarget(privateTarget);
+  const point = await doc.evaluate(() => {
+    const box = document.querySelector("#word").getBoundingClientRect();
+    return {x:box.x+box.width/2, y:box.y+box.height/2};
+  });
+  for (const type of ["mousePressed", "mouseReleased"])
+    await doc.command("Input.dispatchMouseEvent", {type, ...point, button:"right", clickCount:1});
+  const pagesBefore = (await targets()).filter(t => t.type === "page").map(t => t.targetId).sort();
+  const privateWorker = await connectTarget((await targets()).find(t =>
+    t.type === "service_worker" && t.browserContextId === privatePage.context));
+  await privateWorker.evaluate(({url,id}) => handleMenu({menuItemId:"mute-on-x",pageUrl:url,frameId:0},{id}), {url:mutePage,id:privateTab});
+  await until(async () => (await doc.command("Accessibility.getFullAXTree", {})).nodes.some(n =>
+    n.role.value === "StaticText" && n.name.value.includes("Confirmed “nebula”")), "private account save confirmed");
+  assert.equal(await doc.evaluate(() => location.href), mutePage);
+  assert.deepEqual((await targets()).filter(t => t.type === "page").map(t => t.targetId).sort(), pagesBefore);
   await navigate("https://x.com/fixture/feed");
   await privatePage.evaluate(id => chrome.tabs.reload(id), privateTab);
   await until(() => privatePage.evaluate(async id => (await chrome.tabs.get(id)).status === "complete", privateTab), "reload complete");

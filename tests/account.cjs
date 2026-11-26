@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 // pairing. No credentials or request header values enter test output.
 exports.serve = (req, res, visits, hits) => {
   const url = new URL(req.url, "https://x.com");
-  const modern = req.headers.host === "api.x.com";
+  const modern = req.headers[":authority"] === "api.x.com";
   if (!url.pathname.startsWith(modern ? "/graphql/" : "/i/api/graphql/")) return false;
   assert.equal(url.pathname, modern ? "/graphql/3M2SBIjPPDiTvMXkIWTx_w/AboutAccountQuery" :
     "/i/api/graphql/XRqGa7EeokUU5kppkh13EA/AboutAccountQuery");

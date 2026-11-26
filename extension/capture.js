@@ -3,7 +3,6 @@
   let notice;
   let noticeTimer;
   const messages = [];
-  const sourceDocument = crypto.randomUUID();
   const words = new Intl.Segmenter(undefined, { granularity: "word" });
   const containsPoint = (rect, x, y) =>
     x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
@@ -88,13 +87,8 @@
   document.addEventListener("visibilitychange", showNext);
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (message.type === "notice") {
-      if (message.pageUrl !== location.href || message.sourceDocument !== sourceDocument) return;
-      messages.push(message);
-      showNext();
-      respond(true);
-    }
-    if (message.type !== "capture") return;
+    if (message.type !== "mute-selection" || sender.id !== chrome.runtime.id ||
+        window !== window.top || location.origin !== "https://x.com" || message.pageUrl !== location.href) return;
     const last = capture;
     capture = null;
     let term = "";
@@ -110,6 +104,16 @@
         term = selection.replace(/[\r\n]+/gu, " ");
       }
     }
-    respond({ term, sourceDocument });
+    const display = (text, error = false) => {
+      if (message.pageUrl !== location.href) return;
+      messages.push({text, error, pageUrl: message.pageUrl});
+      showNext();
+    };
+    respond(true);
+    if (!term) {
+      display("Right-click directly on a word or a selected phrase, then choose Mute on X again.", true);
+      return;
+    }
+    saveMutedWord(term, message.pageUrl).then(text => display(text), err => display(err.message, true));
   });
 })();

@@ -1,7 +1,4 @@
-(async () => {
-  // Decide ownership before observing, parsing or hiding anything on a helper.
-  const role = await chrome.runtime.sendMessage({type: "feed-context"}).catch(() => null);
-  if (!role || role.helper) return;
+(() => {
   let status = "", enabledAt = performance.now(), firstUsMs = null, activeRead;
   const batchSize = 16;
   let lastPage = "", pendingPage, pageTimer, advances = 0, userAdvance = false, canCheckMore = false;

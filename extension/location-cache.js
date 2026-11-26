@@ -160,12 +160,6 @@
   }
   chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     if (sender.origin !== "https://x.com" || sender.frameId !== 0 || !sender.tab || !sender.documentId) return;
-    if (msg.type === "feed-context") {
-      // createOwned binds the ID before navigation. Recovery also registers
-      // persisted IDs synchronously before it inspects or closes them.
-      startup.then(() => reply({helper: [...running.values()].some(h => h.id === sender.tab.id && !h.taken)}));
-      return true;
-    }
     if (msg.type === "feed-location-snapshot") {
       serial(async () => {
         const {state, entries} = await stateFor(sender, msg.viewer);
